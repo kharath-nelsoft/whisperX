@@ -20,9 +20,9 @@ class DiarizationPipeline:
     ):
         if isinstance(device, str):
             device = torch.device(device)
-        model_config = model_name or "pyannote/speaker-diarization-3.1"
+        model_config = model_name or "pyannote/speaker-diarization-community-1"
         logger.info(f"Loading diarization model: {model_config}")
-        self.model = Pipeline.from_pretrained(model_config, use_auth_token=use_auth_token).to(device)
+        self.model = Pipeline.from_pretrained(model_config, token=use_auth_token).to(device)
 
     def __call__(
         self,
@@ -54,30 +54,21 @@ class DiarizationPipeline:
             'waveform': torch.from_numpy(audio[None, :]),
             'sample_rate': SAMPLE_RATE
         }
+        diarization = self.model(
+            audio_data,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+        )      
 
-        if return_embeddings:
-            diarization, embeddings = self.model(
-                audio_data,
-                num_speakers=num_speakers,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
-                return_embeddings=True,
-            )
-        else:
-            diarization = self.model(
-                audio_data,
-                num_speakers=num_speakers,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
-            )
-            embeddings = None
-
-        diarize_df = pd.DataFrame(diarization.itertracks(yield_label=True), columns=['segment', 'label', 'speaker'])
+        diarize_df = pd.DataFrame(diarization.speaker_diarization.itertracks(yield_label=True), columns=['segment', 'label', 'speaker'])
         diarize_df['start'] = diarize_df['segment'].apply(lambda x: x.start)
         diarize_df['end'] = diarize_df['segment'].apply(lambda x: x.end)
 
-        if return_embeddings and embeddings is not None:
-            speaker_embeddings = {speaker: embeddings[s].tolist() for s, speaker in enumerate(diarization.labels())}
+        # if return_embeddings and embeddings is not None:
+        if return_embeddings and diarization.speaker_embeddings is not None:
+            # speaker_embeddings = {speaker: embeddings[s].tolist() for s, speaker in enumerate(diarization.labels())}
+            speaker_embeddings = {speaker: diarization.speaker_embeddings[s].tolist() for s, speaker in enumerate(diarization.speaker_diarization.labels())}
             return diarize_df, speaker_embeddings
         
         # For backwards compatibility
